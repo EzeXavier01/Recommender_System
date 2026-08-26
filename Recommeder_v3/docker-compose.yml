@@ -1,0 +1,33 @@
+services:
+  api:
+    build: .
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      api:
+        condition: service_healthy
+
+  notebook:
+    build:
+      context: .
+      target: builder
+    working_dir: /build
+    command: >
+      sh -c "pip install --no-cache-dir notebook ipykernel &&
+            jupyter notebook --ip=0.0.0.0 --port=8888 --no-browser --allow-root --NotebookApp.token=''"
+    ports:
+      - "8888:8888"
+    volumes:
+      - ./notebook:/build/notebook
+      - ./data:/build/data

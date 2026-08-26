@@ -1,0 +1,63 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Run test suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Train model (downloads real data, trains, generates artifacts tests depend on)
+        run: python -m app.train
+
+      - name: Run tests
+        run: pytest tests/ -v
+
+  build-and-push:
+    name: Build and push Docker image
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: catawiki-recsys:${{ github.sha }}
+          load: true
+
+      - name: Integration test through the full stack (nginx + api)
+        run: |
+          docker compose up -d
+          sleep 10
+          curl -f http://localhost:8080/nginx-health
+          curl -f "http://localhost:8080/recommend/5?k=5"
+          docker compose down
+
+      # --- Real deploy step, requires real server/registry credentials not present here ---
+      # - name: Deploy to server
+      #   run: |
+      #     docker tag catawiki-recsys:${{ github.sha }} your-registry/catawiki-recsys:latest
+      #     docker push your-registry/catawiki-recsys:latest
+      #     ssh user@your-server "docker compose pull && docker compose up -d"
+      #   env:
+      #     SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
